@@ -1,0 +1,15 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "discord-workout-counter",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-09-07",
+	"vars": {
+		"DISCORD_APPLICATION_ID": "1546387201808535592",
+		"WORKOUT_CHANNEL_ID": "1454857443526840382",
+		"REGISTRY_CHANNEL_ID": "1546418051480559666",
+		"RESULT_CHANNEL_ID": "1454857443526840382"
+	},
+	"triggers": {
+		"crons": ["0 1 * * 1"]
+	}
+}
