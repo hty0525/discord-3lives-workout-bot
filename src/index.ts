@@ -6,11 +6,14 @@ import {
   renderFinalSummary,
 } from "./aggregate";
 import {
+  addReaction,
   channelHasRecentMessageContaining,
   editOriginalInteractionResponse,
   fetchMessagesSince,
+  fetchRecentMessages,
   sendChannelMessage,
 } from "./discord";
+import { parseWorkoutCount } from "./parser";
 import {
   DEFAULT_WEEKLY_TARGET,
   MAX_WEEKLY_TARGET,
@@ -49,6 +52,10 @@ const PERMISSION_ADMINISTRATOR = 1n << 3n;
 const PERMISSION_MANAGE_GUILD = 1n << 5n;
 
 const USER_SELECT_COMPONENT = 5;
+
+const WORKOUT_REACTION_EMOJI = "✅";
+const RECENT_MESSAGE_SCAN_LIMIT = 100;
+const DAILY_DIGEST_CRON = "0 1 * * *";
 
 const HELP_TEXT = [
   "📖 운동봇 사용법",
@@ -770,6 +777,49 @@ async function runWeeklyCron(
   );
 }
 
+async function reactToNewWorkoutMessages(env: Env): Promise<void> {
+  const messages = await fetchRecentMessages(
+    env,
+    env.WORKOUT_CHANNEL_ID,
+    RECENT_MESSAGE_SCAN_LIMIT,
+  );
+
+  for (const message of messages) {
+    if (message.author.bot) continue;
+    if (parseWorkoutCount(message.content) === null) continue;
+
+    const alreadyReacted = message.reactions?.some(
+      (reaction) =>
+        reaction.emoji.name === WORKOUT_REACTION_EMOJI && reaction.me,
+    );
+    if (alreadyReacted) continue;
+
+    await addReaction(
+      env,
+      env.WORKOUT_CHANNEL_ID,
+      message.id,
+      WORKOUT_REACTION_EMOJI,
+    );
+  }
+}
+
+async function runDailyDigest(env: Env): Promise<void> {
+  assertRuntimeConfig(env);
+
+  await reactToNewWorkoutMessages(env);
+
+  const registryEvents = await loadRegistry(env);
+  const weeklyCounts = await loadWorkoutCounts(env);
+  const summary = renderCurrentSummary(
+    registryEvents,
+    weeklyCounts,
+    Date.now(),
+  );
+
+  // 매일 아침 현황판은 조용히 게시합니다(@here 없음). 주간 마감 알림만 @here를 씁니다.
+  await sendChannelMessage(env, env.RESULT_CHANNEL_ID, summary);
+}
+
 export default {
   async fetch(
     request: Request,
@@ -979,6 +1029,11 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
+    if (controller.cron === DAILY_DIGEST_CRON) {
+      await runDailyDigest(env);
+      return;
+    }
+
     await runWeeklyCron(env, controller.scheduledTime);
   },
 };

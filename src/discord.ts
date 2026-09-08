@@ -128,6 +128,35 @@ export async function sendChannelMessage(
   await expectOk(response, "Discord 메시지 전송");
 }
 
+export async function fetchRecentMessages(
+  env: Env,
+  channelId: string,
+  limit: number,
+): Promise<DiscordMessage[]> {
+  const response = await discordApi(
+    env,
+    `/channels/${channelId}/messages?limit=${limit}`,
+  );
+  await expectOk(response, "최근 채널 메시지 조회");
+
+  return (await response.json()) as DiscordMessage[];
+}
+
+export async function addReaction(
+  env: Env,
+  channelId: string,
+  messageId: string,
+  emoji: string,
+): Promise<void> {
+  const response = await discordApi(
+    env,
+    `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`,
+    { method: "PUT" },
+  );
+
+  await expectOk(response, "리액션 추가");
+}
+
 export async function channelHasRecentMessageContaining(
   env: Env,
   channelId: string,
