@@ -2,6 +2,7 @@ import {
   buildWeeklyCounts,
   finalSummaryMarker,
   formatLives,
+  getCount,
   renderCurrentSummary,
   renderFinalSummary,
 } from "./aggregate";
@@ -21,6 +22,7 @@ import {
 } from "./config";
 import {
   buildRegistryEvents,
+  getActiveMembershipsAtWeek,
   getMembershipStateAtWeek,
   hasEverRegistered,
   serializeRegistryEvent,
@@ -33,6 +35,7 @@ import type {
 } from "./types";
 import {
   BASELINE_START_MS,
+  formatWeekRange,
   getWeekIndexFromMs,
 } from "./week";
 import { verifyDiscordRequest } from "./verify";
@@ -80,6 +83,7 @@ const HELP_TEXT = [
   "/목표조절 목표 [사용자] — 관리자용, 목표(분모) 변경",
   "/탈퇴 사용자 — 관리자용, 탈퇴 처리",
   "/집계 [대상] — 이번 주 또는 지난주 현황 확인 (채널에 공개로 표시)",
+  "/룰렛 [대상] — 그 주 목표를 채운 사람 중 무작위로 한 명 추첨 (채널에 공개로 표시)",
   "/도움말 — 지금 이 설명 보기",
 ].join("\n");
 
@@ -224,6 +228,54 @@ async function handleSummary(
   return renderCurrentSummary(registryEvents, weeklyCounts, nowMs);
 }
 
+function pickRandom<T>(items: T[]): T {
+  const buffer = new Uint32Array(1);
+  crypto.getRandomValues(buffer);
+  const index = Math.floor((buffer[0] / (0xffffffff + 1)) * items.length);
+  return items[index];
+}
+
+async function handleRoulette(
+  env: Env,
+  interaction: InteractionPayload,
+): Promise<string> {
+  const nowMs = Date.now();
+  const registryEvents = await loadRegistry(env);
+  const weeklyCounts = await loadWorkoutCounts(env);
+
+  const target = getOptionValue(interaction, "대상");
+  const weekIndex =
+    target === "previous"
+      ? getWeekIndexFromMs(nowMs) - 1
+      : getWeekIndexFromMs(nowMs);
+
+  if (weekIndex < 0) {
+    return "아직 집계할 주차가 없습니다.";
+  }
+
+  const memberships = getActiveMembershipsAtWeek(registryEvents, weekIndex);
+  const eligible = memberships.filter(
+    (membership) =>
+      getCount(weeklyCounts, membership.userId, weekIndex) >=
+      membership.weeklyTarget,
+  );
+
+  if (eligible.length === 0) {
+    return `📛 ${formatWeekRange(weekIndex)} 기준 목표를 채운 사람이 없어서 룰렛을 돌릴 수 없어요.`;
+  }
+
+  const winner = pickRandom(eligible);
+  const candidateNames = eligible.map((membership) => membership.name).join(", ");
+
+  return [
+    `🎰 룰렛 · ${formatWeekRange(weekIndex)}`,
+    "",
+    `후보(목표 달성자 ${eligible.length}명): ${candidateNames}`,
+    "",
+    `🎉 당첨: **${winner.name}**`,
+  ].join("\n");
+}
+
 async function handleRegister(
   env: Env,
   interaction: InteractionPayload,
@@ -312,7 +364,7 @@ async function handleRegister(
     serializeRegistryEvent(event),
   );
 
-  return `✅ ${displayName} 등록 완료 · 시작 목숨: ${formatLives(initialLives)} · 주간 목표: ${weeklyTarget}회`;
+  return `✅ ${displayName} 등록 완료 · 시작 목숨: ${formatLives(initialLives)} · 주간 목표: ${weeklyTarget}회\n궁금한 점은 \`/도움말\` 참고하세요.`;
 }
 
 async function registerSelectedUsers(
@@ -635,6 +687,9 @@ async function finishCommand(
     switch (interaction.data?.name) {
       case "집계":
         content = await handleSummary(env, interaction);
+        break;
+      case "룰렛":
+        content = await handleRoulette(env, interaction);
         break;
       case "등록":
         content = await handleRegister(env, interaction);
@@ -991,7 +1046,7 @@ export default {
         return json({ type: RESPONSE_DEFERRED_MESSAGE, data: { flags: EPHEMERAL } });
       }
 
-      if (commandName === "집계") {
+      if (commandName === "집계" || commandName === "룰렛") {
         ctx.waitUntil(finishCommand(env, interaction));
         return json({ type: RESPONSE_DEFERRED_MESSAGE });
       }

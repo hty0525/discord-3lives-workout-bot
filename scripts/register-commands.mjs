@@ -60,6 +60,23 @@ const commands = [
     ]
   },
   {
+    name: "룰렛",
+    description: "그 주 목표를 채운 사람 중에서 무작위로 한 명을 뽑습니다.",
+    type: 1,
+    options: [
+      {
+        type: 3,
+        name: "대상",
+        description: "이번주 또는 지난주",
+        required: false,
+        choices: [
+          { name: "이번주", value: "current" },
+          { name: "지난주", value: "previous" }
+        ]
+      }
+    ]
+  },
+  {
     name: "등록",
     description: "본인을 등록합니다. 목표(분모)는 직접 고를 수 있고, 관리자는 다른 사용자와 시작 목숨도 지정할 수 있습니다.",
     type: 1,
@@ -190,6 +207,7 @@ if (!response.ok) {
 
 console.log("등록 완료:");
 console.log("- /집계 [대상: 이번주|지난주]");
+console.log("- /룰렛 [대상: 이번주|지난주]");
 console.log("- /등록 [목표: 1~5회]");
 console.log("- /일괄등록 목숨:목1|목2|목3 [목표: 1~5회]");
 console.log("- /목숨조절 목숨:목1|목2|목3 [사용자:@OO]");
