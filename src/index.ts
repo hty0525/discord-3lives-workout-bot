@@ -78,6 +78,7 @@ const HELP_TEXT = [
   "",
   "**명령어**",
   "/운동 [횟수] [대상] [사용자] — 운동 인증. 횟수 비우면 +1, 적으면 그 값으로 (사용자 지정은 관리자만)",
+  "/일괄운동 [횟수] [대상] — 관리자용, 여러 명 골라서 한 번에 운동 기록",
   "/등록 [목표] — 본인 등록 (관리자는 사용자·목숨도 지정 가능)",
   "/일괄등록 목숨 [목표] — 관리자용, 여러 명 한 번에 등록",
   "/목숨조절 목숨 [사용자] — 관리자용, 목숨 변경",
@@ -277,6 +278,94 @@ async function handleRoulette(
   ].join("\n");
 }
 
+function parseWorkoutCountOption(
+  value: string | number | boolean | undefined,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > MAX_WORKOUT_COUNT
+  ) {
+    throw new Error(`횟수는 0~${MAX_WORKOUT_COUNT} 사이 정수여야 합니다.`);
+  }
+  return value;
+}
+
+/**
+ * 여러 사용자의 운동 기록을 남긴다. 횟수를 비우면 각자 그 주 현재 기록에 1을 더한다.
+ * 본인 한 명만 기록할 때를 빼면 관리자만 쓸 수 있다.
+ */
+async function recordWorkouts(
+  env: Env,
+  interaction: InteractionPayload,
+  users: DiscordUser[],
+  countOption: number | undefined,
+  previousWeek: boolean,
+): Promise<string> {
+  const actor = getInvoker(interaction);
+  if (!actor) return "사용자 정보를 확인할 수 없습니다.";
+
+  if (users.length === 0) return "대상 사용자가 없습니다.";
+
+  const selfOnly = users.length === 1 && users[0].id === actor.id;
+  if (!selfOnly && !isAdmin(interaction)) {
+    return "본인 기록만 올릴 수 있어요. 다른 사람 기록은 관리자에게 요청하세요.";
+  }
+
+  const weekIndex = getWeekIndexFromMs(Date.now()) - (previousWeek ? 1 : 0);
+  if (weekIndex < 0) {
+    return "아직 집계할 주차가 없습니다.";
+  }
+
+  const registryEvents = await loadRegistry(env);
+  const weeklyCounts =
+    countOption === undefined ? await loadWorkoutCounts(env) : null;
+
+  const recorded: string[] = [];
+  const skipped: string[] = [];
+
+  for (const user of users) {
+    const state = getMembershipStateAtWeek(registryEvents, user.id, weekIndex);
+
+    if (!state) {
+      skipped.push(`${resolveDisplayName(interaction, user)}(미등록)`);
+      continue;
+    }
+
+    const count =
+      weeklyCounts === null
+        ? (countOption as number)
+        : Math.min(getCount(weeklyCounts, user.id, weekIndex) + 1, MAX_WORKOUT_COUNT);
+
+    await sendChannelMessage(
+      env,
+      env.WORKOUT_CHANNEL_ID,
+      serializeWorkoutLog(user.id, count, state.weeklyTarget, previousWeek),
+    );
+
+    recorded.push(`${state.name} ${count}/${state.weeklyTarget}`);
+  }
+
+  if (selfOnly && recorded.length === 0) {
+    return "등록된 참여자가 아니에요. 먼저 `/등록`으로 등록해 주세요.";
+  }
+
+  const lines = [
+    `✅ 운동 인증 완료 · ${formatWeekRange(weekIndex)}`,
+    ...recorded,
+  ];
+
+  if (skipped.length > 0) {
+    lines.push("", `건너뜀 ${skipped.length}명: ${skipped.join(", ")}`);
+  }
+
+  lines.push("", "횟수를 고치고 싶으면 `횟수:N`을 적어 다시 올리세요. 가장 나중 기록을 씁니다.");
+
+  return lines.join("\n");
+}
+
 async function handleWorkout(
   env: Env,
   interaction: InteractionPayload,
@@ -284,22 +373,8 @@ async function handleWorkout(
   const actor = getInvoker(interaction);
   if (!actor) return "사용자 정보를 확인할 수 없습니다.";
 
-  const countOption = getOptionValue(interaction, "횟수");
-  if (
-    countOption !== undefined &&
-    (typeof countOption !== "number" ||
-      !Number.isInteger(countOption) ||
-      countOption < 0 ||
-      countOption > MAX_WORKOUT_COUNT)
-  ) {
-    return `횟수는 0~${MAX_WORKOUT_COUNT} 사이 정수여야 합니다.`;
-  }
-
+  const countOption = parseWorkoutCountOption(getOptionValue(interaction, "횟수"));
   const previousWeek = getOptionValue(interaction, "대상") === "previous";
-  const weekIndex = getWeekIndexFromMs(Date.now()) - (previousWeek ? 1 : 0);
-  if (weekIndex < 0) {
-    return "아직 집계할 주차가 없습니다.";
-  }
 
   const userOption = getOptionValue(interaction, "사용자");
   let targetUser = actor;
@@ -314,38 +389,7 @@ async function handleWorkout(
     targetUser = resolved;
   }
 
-  const registryEvents = await loadRegistry(env);
-  const state = getMembershipStateAtWeek(
-    registryEvents,
-    targetUser.id,
-    weekIndex,
-  );
-
-  if (!state) {
-    return targetUser.id === actor.id
-      ? "등록된 참여자가 아니에요. 먼저 `/등록`으로 등록해 주세요."
-      : "해당 주에 등록되어 있지 않은 사용자입니다.";
-  }
-
-  // 횟수를 비우면 그 주 현재 기록에 1을 더한다.
-  let count: number;
-  if (typeof countOption === "number") {
-    count = countOption;
-  } else {
-    const weeklyCounts = await loadWorkoutCounts(env);
-    count = Math.min(
-      getCount(weeklyCounts, targetUser.id, weekIndex) + 1,
-      MAX_WORKOUT_COUNT,
-    );
-  }
-
-  await sendChannelMessage(
-    env,
-    env.WORKOUT_CHANNEL_ID,
-    serializeWorkoutLog(targetUser.id, count, state.weeklyTarget, previousWeek),
-  );
-
-  return `✅ ${state.name} ${count}/${state.weeklyTarget} 인증 완료 · ${formatWeekRange(weekIndex)}\n횟수를 고치고 싶으면 \`/운동 횟수:N\`으로 다시 올리세요. 가장 나중 기록을 씁니다.`;
+  return recordWorkouts(env, interaction, [targetUser], countOption, previousWeek);
 }
 
 async function handleRegister(
@@ -837,6 +881,18 @@ async function finishComponent(
         getSelectedUsers(interaction),
         lives,
       );
+    } else if (action === "bulk-workout") {
+      const countOption = parseWorkoutCountOption(
+        rawLives === "" ? undefined : Number(rawLives),
+      );
+
+      content = await recordWorkouts(
+        env,
+        interaction,
+        getSelectedUsers(interaction),
+        countOption,
+        rawTarget === "previous",
+      );
     } else if (action === "bulk-target") {
       const weeklyTarget = Number(rawLives);
 
@@ -1021,6 +1077,42 @@ export default {
         );
       }
 
+      if (commandName === "일괄운동") {
+        if (!isAdmin(interaction)) {
+          return json({
+            type: RESPONSE_MESSAGE,
+            data: {
+              content: "관리자만 일괄운동을 사용할 수 있습니다.",
+              flags: EPHEMERAL,
+            },
+          });
+        }
+
+        let bulkCount: number | undefined;
+        try {
+          bulkCount = parseWorkoutCountOption(getOptionValue(interaction, "횟수"));
+        } catch (error) {
+          return json({
+            type: RESPONSE_MESSAGE,
+            data: {
+              content: error instanceof Error ? error.message : "횟수가 올바르지 않습니다.",
+              flags: EPHEMERAL,
+            },
+          });
+        }
+
+        const bulkWeek =
+          getOptionValue(interaction, "대상") === "previous" ? "previous" : "current";
+        const countLabel =
+          bulkCount === undefined ? "현재 기록 +1" : `${bulkCount}회`;
+
+        return selectUsersResponse(
+          `${bulkWeek === "previous" ? "지난주" : "이번 주"} 운동 기록을 **${countLabel}**로 남길 사용자를 선택하세요.`,
+          `bulk-workout:${bulkCount ?? ""}:${bulkWeek}`,
+          "운동 기록을 남길 사용자 선택 (최대 25명)",
+        );
+      }
+
       if (commandName === "목표조절") {
         const weeklyTarget = getOptionValue(interaction, "목표");
         const target = getOptionValue(interaction, "사용자");
@@ -1115,6 +1207,7 @@ export default {
 
       if (
         customId.startsWith("bulk-register:") ||
+        customId.startsWith("bulk-workout:") ||
         customId.startsWith("bulk-lives:") ||
         customId.startsWith("bulk-target:")
       ) {

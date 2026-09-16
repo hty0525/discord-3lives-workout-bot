@@ -74,6 +74,31 @@ const commands = [
     ]
   },
   {
+    name: "일괄운동",
+    description: "관리자용: 여러 사용자의 운동 기록을 한 번에 남깁니다.",
+    type: 1,
+    options: [
+      {
+        type: 4,
+        name: "횟수",
+        description: "그 주 운동 횟수. 비우면 각자 현재 기록에 +1",
+        required: false,
+        min_value: 0,
+        max_value: 20
+      },
+      {
+        type: 3,
+        name: "대상",
+        description: "이번주 또는 지난주 (기본 이번주)",
+        required: false,
+        choices: [
+          { name: "이번주", value: "current" },
+          { name: "지난주", value: "previous" }
+        ]
+      }
+    ]
+  },
+  {
     name: "집계",
     description: "운동 인증 현황을 Discord 채팅에서 집계합니다.",
     type: 1,
@@ -238,6 +263,7 @@ if (!response.ok) {
 
 console.log("등록 완료:");
 console.log("- /운동 [횟수:0~20] [대상: 이번주|지난주] [사용자:@OO]");
+console.log("- /일괄운동 [횟수:0~20] [대상: 이번주|지난주]");
 console.log("- /집계 [대상: 이번주|지난주]");
 console.log("- /룰렛 [대상: 이번주|지난주]");
 console.log("- /등록 [목표: 1~5회]");
