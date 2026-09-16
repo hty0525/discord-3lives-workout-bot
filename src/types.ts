@@ -18,10 +18,6 @@ export interface DiscordMessage {
     global_name?: string | null;
     bot?: boolean;
   };
-  reactions?: Array<{
-    emoji: { name: string | null };
-    me: boolean;
-  }>;
 }
 
 export interface InteractionOption {

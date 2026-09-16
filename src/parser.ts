@@ -1,35 +1,35 @@
-import { MAX_WEEKLY_TARGET, MIN_WEEKLY_TARGET } from "./config";
+import { LATE_PREVIOUS_WEEK_KEYWORD } from "./config";
+import type { DiscordMessage } from "./types";
 
-const COUNT_PATTERN = /(\d+)\s*\/\s*(\d+)(?!\d)/g;
-
-/**
- * "이름 x/y > 목n" 형태로 여러 사람 기록을 한 메시지에 모아 적은 수동 요약글은
- * 개인 인증이 아니므로 걸러낸다. 이런 글을 그대로 파싱하면 첫 줄의 값이
- * 그 메시지를 올린 사람 본인 기록으로 잘못 잡힌다.
- */
-function looksLikeSummary(content: string): boolean {
-  if (content.includes(">")) return true;
-
-  const matches = content.match(COUNT_PATTERN);
-  return matches !== null && matches.length > 1;
+export interface WorkoutLog {
+  userId: string;
+  count: number;
 }
 
 /**
- * 분모(목표)는 등록된 사람마다 다를 수 있어 채팅에서는 형식만 확인한다.
- * 실제 성공/실패 판정은 그 사람의 등록된 weeklyTarget 기준으로 aggregate에서 계산한다.
+ * /운동 명령이 운동 인증 채널에 남기는 기록 메시지.
+ * 봇이 쓴 이 메시지가 곧 저장소이므로 사람이 쓴 채팅은 집계에 들어가지 않는다.
+ * 예: "✅ <@123> 운동 인증 2/3", "✅ <@123> 지난주 운동 인증 2/3"
  */
-export function parseWorkoutCount(content: string): number | null {
-  if (looksLikeSummary(content)) return null;
+const WORKOUT_LOG_PATTERN = new RegExp(
+  `^✅ <@!?(\\d+)> (?:${LATE_PREVIOUS_WEEK_KEYWORD} )?운동 인증 (\\d+)/(\\d+)$`,
+);
 
-  const match = content.match(/(\d+)\s*\/\s*(\d+)(?!\d)/);
+export function serializeWorkoutLog(
+  userId: string,
+  count: number,
+  weeklyTarget: number,
+  previousWeek: boolean,
+): string {
+  const weekLabel = previousWeek ? `${LATE_PREVIOUS_WEEK_KEYWORD} ` : "";
+  return `✅ <@${userId}> ${weekLabel}운동 인증 ${count}/${weeklyTarget}`;
+}
 
+export function parseWorkoutLog(message: DiscordMessage): WorkoutLog | null {
+  if (!message.author.bot) return null;
+
+  const match = message.content.match(WORKOUT_LOG_PATTERN);
   if (!match) return null;
 
-  const count = Number(match[1]);
-  const denominator = Number(match[2]);
-
-  if (!Number.isFinite(count)) return null;
-  if (denominator < MIN_WEEKLY_TARGET || denominator > MAX_WEEKLY_TARGET) return null;
-
-  return count;
+  return { userId: match[1], count: Number(match[2]) };
 }

@@ -43,6 +43,31 @@ const targetChoices = [
 
 const commands = [
   {
+    name: "운동",
+    description: "이번 주(또는 지난주) 운동 횟수를 인증합니다. 다시 올리면 가장 나중 기록으로 바뀝니다.",
+    type: 1,
+    options: [
+      {
+        type: 4,
+        name: "횟수",
+        description: "그 주에 운동한 횟수",
+        required: true,
+        min_value: 0,
+        max_value: 20
+      },
+      {
+        type: 3,
+        name: "대상",
+        description: "이번주 또는 지난주 (기본 이번주)",
+        required: false,
+        choices: [
+          { name: "이번주", value: "current" },
+          { name: "지난주", value: "previous" }
+        ]
+      }
+    ]
+  },
+  {
     name: "집계",
     description: "운동 인증 현황을 Discord 채팅에서 집계합니다.",
     type: 1,
@@ -146,7 +171,7 @@ const commands = [
   },
   {
     name: "목표조절",
-    description: "관리자용: 등록된 사용자의 주간 목표(분모)를 변경합니다.",
+    description: "본인의 주간 목표(분모)를 변경합니다. 관리자는 다른 사용자도 변경할 수 있습니다.",
     type: 1,
     options: [
       {
@@ -159,7 +184,7 @@ const commands = [
       {
         type: 6,
         name: "사용자",
-        description: "한 명만 바로 변경할 때 선택. 비우면 여러 명 선택 가능",
+        description: "관리자용: 변경할 사용자. 비우면 본인(관리자는 여러 명 선택 가능)",
         required: false
       }
     ]
@@ -206,6 +231,7 @@ if (!response.ok) {
 }
 
 console.log("등록 완료:");
+console.log("- /운동 횟수:0~20 [대상: 이번주|지난주]");
 console.log("- /집계 [대상: 이번주|지난주]");
 console.log("- /룰렛 [대상: 이번주|지난주]");
 console.log("- /등록 [목표: 1~5회]");
