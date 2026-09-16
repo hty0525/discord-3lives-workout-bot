@@ -50,8 +50,8 @@ const commands = [
       {
         type: 4,
         name: "횟수",
-        description: "그 주에 운동한 횟수",
-        required: true,
+        description: "그 주 운동 횟수. 비우면 현재 기록에 +1",
+        required: false,
         min_value: 0,
         max_value: 20
       },
@@ -64,6 +64,12 @@ const commands = [
           { name: "이번주", value: "current" },
           { name: "지난주", value: "previous" }
         ]
+      },
+      {
+        type: 6,
+        name: "사용자",
+        description: "관리자용: 대신 기록할 사용자",
+        required: false
       }
     ]
   },
@@ -231,7 +237,7 @@ if (!response.ok) {
 }
 
 console.log("등록 완료:");
-console.log("- /운동 횟수:0~20 [대상: 이번주|지난주]");
+console.log("- /운동 [횟수:0~20] [대상: 이번주|지난주] [사용자:@OO]");
 console.log("- /집계 [대상: 이번주|지난주]");
 console.log("- /룰렛 [대상: 이번주|지난주]");
 console.log("- /등록 [목표: 1~5회]");
