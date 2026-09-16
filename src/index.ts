@@ -64,19 +64,20 @@ const HELP_TEXT = [
   "매주 월요일 10:00 KST ~ 다음 월요일 10:00 KST 직전",
   "",
   "**운동 인증**",
-  "`/운동 횟수:2`처럼 이번 주까지 운동한 횟수를 명령으로 올리면 인증돼요",
+  "운동한 날 `/운동`을 올리면 이번 주 횟수가 1 올라가요",
+  "· `/운동 횟수:2`처럼 횟수를 적으면 그 값으로 바로 기록돼요",
   "· 채팅에 \"운동 2/3\"이라고 쓰는 건 잡담이에요. 명령으로만 집계돼요",
   "· 목표(분모)는 본인이 등록한 횟수예요 (기본 3회, 1~5회 중 선택 가능)",
-  "· 잘못 올렸으면 `/운동`을 다시 올리면 돼요. 같은 주에는 가장 나중 기록을 씁니다",
+  "· 잘못 올렸으면 `/운동 횟수:N`으로 다시 올리면 돼요. 같은 주에는 가장 나중 기록을 씁니다",
   "· `/운동 횟수:3 대상:지난주`처럼 대상을 고르면 직전 주 기록으로 들어가요",
-  "· 본인 기록만 올릴 수 있어요",
+  "· 본인 기록만 올릴 수 있어요 (관리자는 사용자를 지정해 대신 기록 가능)",
   "",
   "**목숨 규칙**",
   "목표 미달 시 부족한 횟수만큼 목숨을 차감해요 (2/3→-1, 1/3→-2, 0/3→-3)",
   "목숨이 0이 되는 순간 💀 표시 후 즉시 ❤️❤️❤️로 초기화되고, 남은 차감은 계속 적용돼요",
   "",
   "**명령어**",
-  "/운동 횟수 [대상] — 운동 인증 (본인만, 다시 올리면 정정)",
+  "/운동 [횟수] [대상] [사용자] — 운동 인증. 횟수 비우면 +1, 적으면 그 값으로 (사용자 지정은 관리자만)",
   "/등록 [목표] — 본인 등록 (관리자는 사용자·목숨도 지정 가능)",
   "/일괄등록 목숨 [목표] — 관리자용, 여러 명 한 번에 등록",
   "/목숨조절 목숨 [사용자] — 관리자용, 목숨 변경",
@@ -285,10 +286,11 @@ async function handleWorkout(
 
   const countOption = getOptionValue(interaction, "횟수");
   if (
-    typeof countOption !== "number" ||
-    !Number.isInteger(countOption) ||
-    countOption < 0 ||
-    countOption > MAX_WORKOUT_COUNT
+    countOption !== undefined &&
+    (typeof countOption !== "number" ||
+      !Number.isInteger(countOption) ||
+      countOption < 0 ||
+      countOption > MAX_WORKOUT_COUNT)
   ) {
     return `횟수는 0~${MAX_WORKOUT_COUNT} 사이 정수여야 합니다.`;
   }
@@ -299,20 +301,51 @@ async function handleWorkout(
     return "아직 집계할 주차가 없습니다.";
   }
 
+  const userOption = getOptionValue(interaction, "사용자");
+  let targetUser = actor;
+
+  if (typeof userOption === "string") {
+    if (!isAdmin(interaction)) {
+      return "본인 기록만 올릴 수 있어요. 다른 사람 기록은 관리자에게 요청하세요.";
+    }
+
+    const resolved = resolveTargetUser(interaction, userOption);
+    if (!resolved) return "기록할 사용자를 확인할 수 없습니다.";
+    targetUser = resolved;
+  }
+
   const registryEvents = await loadRegistry(env);
-  const state = getMembershipStateAtWeek(registryEvents, actor.id, weekIndex);
+  const state = getMembershipStateAtWeek(
+    registryEvents,
+    targetUser.id,
+    weekIndex,
+  );
 
   if (!state) {
-    return "등록된 참여자가 아니에요. 먼저 `/등록`으로 등록해 주세요.";
+    return targetUser.id === actor.id
+      ? "등록된 참여자가 아니에요. 먼저 `/등록`으로 등록해 주세요."
+      : "해당 주에 등록되어 있지 않은 사용자입니다.";
+  }
+
+  // 횟수를 비우면 그 주 현재 기록에 1을 더한다.
+  let count: number;
+  if (typeof countOption === "number") {
+    count = countOption;
+  } else {
+    const weeklyCounts = await loadWorkoutCounts(env);
+    count = Math.min(
+      getCount(weeklyCounts, targetUser.id, weekIndex) + 1,
+      MAX_WORKOUT_COUNT,
+    );
   }
 
   await sendChannelMessage(
     env,
     env.WORKOUT_CHANNEL_ID,
-    serializeWorkoutLog(actor.id, countOption, state.weeklyTarget, previousWeek),
+    serializeWorkoutLog(targetUser.id, count, state.weeklyTarget, previousWeek),
   );
 
-  return `✅ ${state.name} ${countOption}/${state.weeklyTarget} 인증 완료 · ${formatWeekRange(weekIndex)}\n횟수를 고치고 싶으면 \`/운동\`을 다시 올리세요. 가장 나중 기록을 씁니다.`;
+  return `✅ ${state.name} ${count}/${state.weeklyTarget} 인증 완료 · ${formatWeekRange(weekIndex)}\n횟수를 고치고 싶으면 \`/운동 횟수:N\`으로 다시 올리세요. 가장 나중 기록을 씁니다.`;
 }
 
 async function handleRegister(
