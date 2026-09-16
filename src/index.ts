@@ -7,17 +7,16 @@ import {
   renderFinalSummary,
 } from "./aggregate";
 import {
-  addReaction,
   channelHasRecentMessageContaining,
   editOriginalInteractionResponse,
   fetchMessagesSince,
-  fetchRecentMessages,
   sendChannelMessage,
 } from "./discord";
-import { parseWorkoutCount } from "./parser";
+import { serializeWorkoutLog } from "./parser";
 import {
   DEFAULT_WEEKLY_TARGET,
   MAX_WEEKLY_TARGET,
+  MAX_WORKOUT_COUNT,
   MIN_WEEKLY_TARGET,
 } from "./config";
 import {
@@ -56,8 +55,6 @@ const PERMISSION_MANAGE_GUILD = 1n << 5n;
 
 const USER_SELECT_COMPONENT = 5;
 
-const WORKOUT_REACTION_EMOJI = "✅";
-const RECENT_MESSAGE_SCAN_LIMIT = 100;
 const DAILY_DIGEST_CRON = "0 1 * * *";
 
 const HELP_TEXT = [
@@ -67,20 +64,23 @@ const HELP_TEXT = [
   "매주 월요일 10:00 KST ~ 다음 월요일 10:00 KST 직전",
   "",
   "**운동 인증**",
-  "채팅에 `x/y` 형태로 올리면 인증돼요 (예: 운동 3/3, 헬스(2/3))",
-  "· y(분모)는 본인이 등록한 목표 횟수예요 (기본 3회, 1~5회 중 선택 가능)",
-  "· 같은 주에 여러 번 올리면 그중 최댓값을 씁니다",
-  "· \"지난주 3/3\"처럼 '지난주'를 포함하면 직전 주 기록으로 들어가요",
+  "`/운동 횟수:2`처럼 이번 주까지 운동한 횟수를 명령으로 올리면 인증돼요",
+  "· 채팅에 \"운동 2/3\"이라고 쓰는 건 잡담이에요. 명령으로만 집계돼요",
+  "· 목표(분모)는 본인이 등록한 횟수예요 (기본 3회, 1~5회 중 선택 가능)",
+  "· 잘못 올렸으면 `/운동`을 다시 올리면 돼요. 같은 주에는 가장 나중 기록을 씁니다",
+  "· `/운동 횟수:3 대상:지난주`처럼 대상을 고르면 직전 주 기록으로 들어가요",
+  "· 본인 기록만 올릴 수 있어요",
   "",
   "**목숨 규칙**",
   "목표 미달 시 부족한 횟수만큼 목숨을 차감해요 (2/3→-1, 1/3→-2, 0/3→-3)",
   "목숨이 0이 되는 순간 💀 표시 후 즉시 ❤️❤️❤️로 초기화되고, 남은 차감은 계속 적용돼요",
   "",
   "**명령어**",
+  "/운동 횟수 [대상] — 운동 인증 (본인만, 다시 올리면 정정)",
   "/등록 [목표] — 본인 등록 (관리자는 사용자·목숨도 지정 가능)",
   "/일괄등록 목숨 [목표] — 관리자용, 여러 명 한 번에 등록",
   "/목숨조절 목숨 [사용자] — 관리자용, 목숨 변경",
-  "/목표조절 목표 [사용자] — 관리자용, 목표(분모) 변경",
+  "/목표조절 목표 [사용자] — 본인 목표(분모) 변경 (관리자는 다른 사람도 가능)",
   "/탈퇴 사용자 — 관리자용, 탈퇴 처리",
   "/집계 [대상] — 이번 주 또는 지난주 현황 확인 (채널에 공개로 표시)",
   "/룰렛 [대상] — 그 주 목표를 채운 사람 중 무작위로 한 명 추첨 (채널에 공개로 표시)",
@@ -274,6 +274,45 @@ async function handleRoulette(
     "",
     `🎉 당첨: **${winner.name}**`,
   ].join("\n");
+}
+
+async function handleWorkout(
+  env: Env,
+  interaction: InteractionPayload,
+): Promise<string> {
+  const actor = getInvoker(interaction);
+  if (!actor) return "사용자 정보를 확인할 수 없습니다.";
+
+  const countOption = getOptionValue(interaction, "횟수");
+  if (
+    typeof countOption !== "number" ||
+    !Number.isInteger(countOption) ||
+    countOption < 0 ||
+    countOption > MAX_WORKOUT_COUNT
+  ) {
+    return `횟수는 0~${MAX_WORKOUT_COUNT} 사이 정수여야 합니다.`;
+  }
+
+  const previousWeek = getOptionValue(interaction, "대상") === "previous";
+  const weekIndex = getWeekIndexFromMs(Date.now()) - (previousWeek ? 1 : 0);
+  if (weekIndex < 0) {
+    return "아직 집계할 주차가 없습니다.";
+  }
+
+  const registryEvents = await loadRegistry(env);
+  const state = getMembershipStateAtWeek(registryEvents, actor.id, weekIndex);
+
+  if (!state) {
+    return "등록된 참여자가 아니에요. 먼저 `/등록`으로 등록해 주세요.";
+  }
+
+  await sendChannelMessage(
+    env,
+    env.WORKOUT_CHANNEL_ID,
+    serializeWorkoutLog(actor.id, countOption, state.weeklyTarget, previousWeek),
+  );
+
+  return `✅ ${state.name} ${countOption}/${state.weeklyTarget} 인증 완료 · ${formatWeekRange(weekIndex)}\n횟수를 고치고 싶으면 \`/운동\`을 다시 올리세요. 가장 나중 기록을 씁니다.`;
 }
 
 async function handleRegister(
@@ -513,14 +552,15 @@ async function adjustTarget(
   users: DiscordUser[],
   weeklyTarget: number,
 ): Promise<string> {
-  if (!isAdmin(interaction)) {
-    return "관리자만 목표를 조절할 수 있습니다.";
-  }
-
   const actor = getInvoker(interaction);
   if (!actor) return "사용자 정보를 확인할 수 없습니다.";
 
   if (users.length === 0) return "대상 사용자가 없습니다.";
+
+  const selfOnly = users.length === 1 && users[0].id === actor.id;
+  if (!selfOnly && !isAdmin(interaction)) {
+    return "본인 목표만 바꿀 수 있어요. 다른 사람 목표는 관리자에게 요청하세요.";
+  }
 
   const currentWeekIndex = getWeekIndexFromMs(Date.now());
   const registryEvents = await loadRegistry(env);
@@ -604,9 +644,8 @@ async function handleTargetAdjust(
   env: Env,
   interaction: InteractionPayload,
 ): Promise<string> {
-  if (!isAdmin(interaction)) {
-    return "관리자만 목표를 조절할 수 있습니다.";
-  }
+  const actor = getInvoker(interaction);
+  if (!actor) return "사용자 정보를 확인할 수 없습니다.";
 
   const weeklyTarget = getOptionValue(interaction, "목표");
   const targetOption = getOptionValue(interaction, "사용자");
@@ -615,8 +654,9 @@ async function handleTargetAdjust(
     return "변경할 목표를 지정하세요.";
   }
 
+  // 사용자를 지정하지 않으면 본인 목표를 바꾼다.
   if (typeof targetOption !== "string") {
-    return "조절할 사용자를 지정하세요.";
+    return adjustTarget(env, interaction, [actor], weeklyTarget);
   }
 
   const user = resolveTargetUser(interaction, targetOption);
@@ -690,6 +730,9 @@ async function finishCommand(
         break;
       case "룰렛":
         content = await handleRoulette(env, interaction);
+        break;
+      case "운동":
+        content = await handleWorkout(env, interaction);
         break;
       case "등록":
         content = await handleRegister(env, interaction);
@@ -832,36 +875,8 @@ async function runWeeklyCron(
   );
 }
 
-async function reactToNewWorkoutMessages(env: Env): Promise<void> {
-  const messages = await fetchRecentMessages(
-    env,
-    env.WORKOUT_CHANNEL_ID,
-    RECENT_MESSAGE_SCAN_LIMIT,
-  );
-
-  for (const message of messages) {
-    if (message.author.bot) continue;
-    if (parseWorkoutCount(message.content) === null) continue;
-
-    const alreadyReacted = message.reactions?.some(
-      (reaction) =>
-        reaction.emoji.name === WORKOUT_REACTION_EMOJI && reaction.me,
-    );
-    if (alreadyReacted) continue;
-
-    await addReaction(
-      env,
-      env.WORKOUT_CHANNEL_ID,
-      message.id,
-      WORKOUT_REACTION_EMOJI,
-    );
-  }
-}
-
 async function runDailyDigest(env: Env): Promise<void> {
   assertRuntimeConfig(env);
-
-  await reactToNewWorkoutMessages(env);
 
   const registryEvents = await loadRegistry(env);
   const weeklyCounts = await loadWorkoutCounts(env);
@@ -974,16 +989,6 @@ export default {
       }
 
       if (commandName === "목표조절") {
-        if (!isAdmin(interaction)) {
-          return json({
-            type: RESPONSE_MESSAGE,
-            data: {
-              content: "관리자만 목표를 조절할 수 있습니다.",
-              flags: EPHEMERAL,
-            },
-          });
-        }
-
         const weeklyTarget = getOptionValue(interaction, "목표");
         const target = getOptionValue(interaction, "사용자");
 
@@ -997,7 +1002,18 @@ export default {
           });
         }
 
-        if (typeof target !== "string") {
+        // 일반 사용자는 사용자 옵션 없이 본인 목표만 바꿀 수 있다.
+        if (!isAdmin(interaction) && typeof target === "string") {
+          return json({
+            type: RESPONSE_MESSAGE,
+            data: {
+              content: "본인 목표만 바꿀 수 있어요. 다른 사람 목표는 관리자에게 요청하세요.",
+              flags: EPHEMERAL,
+            },
+          });
+        }
+
+        if (isAdmin(interaction) && typeof target !== "string") {
           return selectUsersResponse(
             `목표를 **${weeklyTarget}회**로 변경할 사용자를 선택하세요.`,
             `bulk-target:${weeklyTarget}`,
@@ -1051,7 +1067,11 @@ export default {
         return json({ type: RESPONSE_DEFERRED_MESSAGE });
       }
 
-      if (commandName === "등록" || commandName === "탈퇴") {
+      if (
+        commandName === "운동" ||
+        commandName === "등록" ||
+        commandName === "탈퇴"
+      ) {
         ctx.waitUntil(finishCommand(env, interaction));
         return json({ type: RESPONSE_DEFERRED_MESSAGE, data: { flags: EPHEMERAL } });
       }

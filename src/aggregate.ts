@@ -1,5 +1,5 @@
 import type { DiscordMessage, MembershipState, RegistryEvent } from "./types";
-import { parseWorkoutCount } from "./parser";
+import { parseWorkoutLog } from "./parser";
 import {
 	getActiveMembershipsAtWeek,
 	getMembershipStateAtWeek,
@@ -24,26 +24,32 @@ export interface AppliedWeekResult {
 	reset: boolean;
 }
 
+/**
+ * 같은 사람이 같은 주에 여러 번 기록하면 가장 나중 기록을 쓴다.
+ * /운동으로 본인 횟수를 다시 올려 정정할 수 있게 하기 위함.
+ */
 export function buildWeeklyCounts(messages: DiscordMessage[]): WeeklyCounts {
 	const counts: WeeklyCounts = new Map();
+	const latestMs = new Map<string, Map<number, number>>();
 
 	for (const message of messages) {
-		if (message.author.bot) continue;
-
-		const count = parseWorkoutCount(message.content);
-		if (count === null) continue;
+		const log = parseWorkoutLog(message);
+		if (!log) continue;
 
 		const weekIndex = getMessageWeekIndex(message.timestamp, message.content);
 		if (weekIndex < 0) continue;
 
-		let memberWeeks = counts.get(message.author.id);
-		if (!memberWeeks) {
-			memberWeeks = new Map();
-			counts.set(message.author.id, memberWeeks);
-		}
+		const timestampMs = Date.parse(message.timestamp);
+		const memberLatest = latestMs.get(log.userId) ?? new Map<number, number>();
+		const previousMs = memberLatest.get(weekIndex);
+		if (previousMs !== undefined && previousMs >= timestampMs) continue;
 
-		const previous = memberWeeks.get(weekIndex) ?? 0;
-		memberWeeks.set(weekIndex, Math.max(previous, count));
+		memberLatest.set(weekIndex, timestampMs);
+		latestMs.set(log.userId, memberLatest);
+
+		const memberWeeks = counts.get(log.userId) ?? new Map<number, number>();
+		memberWeeks.set(weekIndex, log.count);
+		counts.set(log.userId, memberWeeks);
 	}
 
 	return counts;
