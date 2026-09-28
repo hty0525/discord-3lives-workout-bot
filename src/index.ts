@@ -88,7 +88,7 @@ const HELP_TEXT = [
   "/목표조절 목표 [사용자] — 본인 목표(분모) 변경 (관리자는 다른 사람도 가능)",
   "/탈퇴 사용자 — 관리자용, 탈퇴 처리",
   "/집계 [대상] — 이번 주 또는 지난주 현황 확인 (채널에 공개로 표시)",
-  "/룰렛 [대상] — 그 주 💀 없이 살아남은 사람 중 무작위로 한 명 추첨 (채널에 공개로 표시)",
+  "/룰렛 [대상] — 그 주 💀가 된 사람 수만큼 생존자 중에서 받을 사람 추첨 (💀 없으면 안 돌림, 채널에 공개로 표시)",
   "/도움말 — 지금 이 설명 보기",
 ].join("\n");
 
@@ -233,11 +233,20 @@ async function handleSummary(
   return renderCurrentSummary(registryEvents, weeklyCounts, nowMs);
 }
 
-function pickRandom<T>(items: T[]): T {
+function pickRandomIndex(length: number): number {
   const buffer = new Uint32Array(1);
   crypto.getRandomValues(buffer);
-  const index = Math.floor((buffer[0] / (0xffffffff + 1)) * items.length);
-  return items[index];
+  return Math.floor((buffer[0] / (0xffffffff + 1)) * length);
+}
+
+/** items에서 중복 없이 최대 count개를 무작위로 뽑는다. */
+function pickRandomMany<T>(items: T[], count: number): T[] {
+  const pool = [...items];
+  const picked: T[] = [];
+  while (picked.length < count && pool.length > 0) {
+    picked.push(pool.splice(pickRandomIndex(pool.length), 1)[0]);
+  }
+  return picked;
 }
 
 async function handleRoulette(
@@ -258,9 +267,13 @@ async function handleRoulette(
     return "아직 집계할 주차가 없습니다.";
   }
 
+  // 그 주 차감으로 💀가 된 사람이 지급자, 나머지 생존자가 후보입니다.
+  // 지급자 수만큼 생존자 중에서 받을 사람을 중복 없이 뽑습니다.
   const memberships = getActiveMembershipsAtWeek(registryEvents, weekIndex);
-  // 목표 달성 여부가 아니라 그 주 차감으로 💀가 되지 않은 사람(생존자)을 후보로 삼습니다.
-  const eligible = memberships.filter((membership) => {
+  const payers: typeof memberships = [];
+  const survivors: typeof memberships = [];
+
+  for (const membership of memberships) {
     const livesBefore = getLivesBeforeWeek(
       membership,
       registryEvents,
@@ -268,22 +281,31 @@ async function handleRoulette(
       weekIndex,
     );
     const count = getCount(weeklyCounts, membership.userId, weekIndex);
-    return !applyWeek(livesBefore, count, membership.weeklyTarget).reset;
-  });
-
-  if (eligible.length === 0) {
-    return `📛 ${formatWeekRange(weekIndex)} 기준 살아남은 사람이 없어서 룰렛을 돌릴 수 없어요.`;
+    const { reset } = applyWeek(livesBefore, count, membership.weeklyTarget);
+    (reset ? payers : survivors).push(membership);
   }
 
-  const winner = pickRandom(eligible);
-  const candidateNames = eligible.map((membership) => membership.name).join(", ");
+  const range = formatWeekRange(weekIndex);
+
+  if (payers.length === 0) {
+    return `🎰 ${range} 기준 💀가 된 사람이 없어서 룰렛을 돌리지 않아요.`;
+  }
+
+  if (survivors.length === 0) {
+    return `📛 ${range} 기준 살아남은 사람이 없어서 룰렛을 돌릴 수 없어요.`;
+  }
+
+  const winners = pickRandomMany(survivors, payers.length);
+  const names = (items: typeof memberships) =>
+    items.map((membership) => membership.name).join(", ");
 
   return [
-    `🎰 룰렛 · ${formatWeekRange(weekIndex)}`,
+    `🎰 룰렛 · ${range}`,
     "",
-    `후보(생존자 ${eligible.length}명): ${candidateNames}`,
+    `💀 지급(${payers.length}명): ${names(payers)}`,
+    `후보(생존자 ${survivors.length}명): ${names(survivors)}`,
     "",
-    `🎉 당첨: **${winner.name}**`,
+    `🎉 당첨(${winners.length}명): **${names(winners)}**`,
   ].join("\n");
 }
 
