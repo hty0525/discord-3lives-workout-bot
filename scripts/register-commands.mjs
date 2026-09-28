@@ -235,9 +235,26 @@ const commands = [
   },
   {
     name: "도움말",
-    description: "봇 사용법과 규칙을 안내합니다.",
+    description: "봇 사용법과 규칙, 업데이트 내역을 안내합니다.",
     type: 1,
-    options: []
+    options: [
+      {
+        type: 3,
+        name: "보기",
+        description: "사용법(기본) 또는 업데이트 내역",
+        required: false,
+        choices: [
+          { name: "사용법", value: "usage" },
+          { name: "업데이트", value: "updates" }
+        ]
+      },
+      {
+        type: 5,
+        name: "공개",
+        description: "True면 나만 보기 대신 채널에 메시지로 올립니다",
+        required: false
+      }
+    ]
   }
 ];
 
@@ -271,4 +288,4 @@ console.log("- /일괄등록 목숨:목1|목2|목3 [목표: 1~5회]");
 console.log("- /목숨조절 목숨:목1|목2|목3 [사용자:@OO]");
 console.log("- /목표조절 목표:1~5회 [사용자:@OO]");
 console.log("- /탈퇴 사용자:@OO");
-console.log("- /도움말");
+console.log("- /도움말 [보기: 사용법|업데이트] [공개]");
