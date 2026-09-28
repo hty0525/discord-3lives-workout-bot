@@ -88,7 +88,7 @@ const HELP_TEXT = [
   "/목표조절 목표 [사용자] — 본인 목표(분모) 변경 (관리자는 다른 사람도 가능)",
   "/탈퇴 사용자 — 관리자용, 탈퇴 처리",
   "/집계 [대상] — 이번 주 또는 지난주 현황 확인 (채널에 공개로 표시)",
-  "/룰렛 [대상] — 그 주 💀가 된 사람 수만큼 생존자 중에서 받을 사람 추첨 (💀 없으면 안 돌림, 채널에 공개로 표시)",
+  "/룰렛 [대상] — (기본 지난주) 그 주 💀가 된 사람 수만큼 생존자 중에서 받을 사람 추첨 (💀 없으면 안 돌림, 채널에 공개로 표시)",
   "/도움말 — 지금 이 설명 보기",
 ].join("\n");
 
@@ -257,11 +257,12 @@ async function handleRoulette(
   const registryEvents = await loadRegistry(env);
   const weeklyCounts = await loadWorkoutCounts(env);
 
+  // 룰렛은 마감된 주를 두고 돌리므로 대상을 비우면 지난주로 봅니다.
   const target = getOptionValue(interaction, "대상");
   const weekIndex =
-    target === "previous"
-      ? getWeekIndexFromMs(nowMs) - 1
-      : getWeekIndexFromMs(nowMs);
+    target === "current"
+      ? getWeekIndexFromMs(nowMs)
+      : getWeekIndexFromMs(nowMs) - 1;
 
   if (weekIndex < 0) {
     return "아직 집계할 주차가 없습니다.";

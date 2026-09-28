@@ -123,7 +123,7 @@ const commands = [
       {
         type: 3,
         name: "대상",
-        description: "이번주 또는 지난주",
+        description: "지난주(기본) 또는 이번주",
         required: false,
         choices: [
           { name: "이번주", value: "current" },
@@ -265,7 +265,7 @@ console.log("등록 완료:");
 console.log("- /운동 [횟수:0~20] [대상: 이번주|지난주] [사용자:@OO]");
 console.log("- /일괄운동 [횟수:0~20] [대상: 이번주|지난주]");
 console.log("- /집계 [대상: 이번주|지난주]");
-console.log("- /룰렛 [대상: 이번주|지난주]");
+console.log("- /룰렛 [대상: 지난주(기본)|이번주]");
 console.log("- /등록 [목표: 1~5회]");
 console.log("- /일괄등록 목숨:목1|목2|목3 [목표: 1~5회]");
 console.log("- /목숨조절 목숨:목1|목2|목3 [사용자:@OO]");
