@@ -90,8 +90,8 @@ const HELP_TEXT = [
   "/운동 [횟수] [대상] — 운동 인증",
   "/집계 [대상] — 이번 주 현황 (대상:지난주면 지난주 마감표)",
   "/룰렛 [대상] — 지급자 수만큼 받을 사람 추첨",
-  "/등록 [목표] — 참여 등록 (목표 1~5회, 기본 3회)",
-  "/목표조절 목표 — 내 주간 목표 변경",
+  "/등록 [목표] — 참여 등록 (목표 1~5회, 기본 3회). 등록한 주부터 집계, 재등록은 관리자에게",
+  "/목표조절 목표 — 내 주간 목표 변경. 이번 주부터 적용, 목숨은 그대로",
   "/도움말 [보기] [공개] — 사용법 / 업데이트 내역 (공개:True면 채널에 올림)",
   "",
   "**관리자 전용**",
@@ -112,6 +112,7 @@ const UPDATE_TEXT = [
   "· `/룰렛` 대상 기본값을 지난주로 변경",
   "· `/도움말`을 한 주 흐름 중심으로 정리, `보기:업데이트`로 이 내역 확인",
   "· `/도움말 공개:True`면 채널에 모두가 보는 메시지로 올라가요",
+  "· `/목표조절` 하면 목숨이 처음 등록 값으로 되돌아가던 문제 수정",
   "",
   "**v3.0.0 (2026.09.16)**",
   "· 운동 인증을 `/운동` 슬래시 명령으로 변경 (채팅 \"운동 2/3\"은 집계 안 됨)",
@@ -701,6 +702,7 @@ async function adjustTarget(
 
   const currentWeekIndex = getWeekIndexFromMs(Date.now());
   const registryEvents = await loadRegistry(env);
+  const weeklyCounts = await loadWorkoutCounts(env);
 
   const adjusted: string[] = [];
   const skipped: string[] = [];
@@ -724,8 +726,14 @@ async function adjustTarget(
       userId: user.id,
       name,
       effectiveWeekIndex: currentWeekIndex,
-      // 목표만 바꾸는 요청이므로 기존 목숨은 그대로 유지한다.
-      initialLives: state.initialLives,
+      // 목표만 바꾸는 요청이므로 이번 주 시작 시점의 현재 목숨을 이어받는다.
+      // state.initialLives는 구간 시작(등록·조절) 때 값이라 그대로 쓰면 목숨이 되돌아간다.
+      initialLives: getLivesBeforeWeek(
+        state,
+        registryEvents,
+        weeklyCounts,
+        currentWeekIndex,
+      ),
       weeklyTarget,
       createdAt: new Date().toISOString(),
       actorId: actor.id,
