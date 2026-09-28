@@ -144,12 +144,14 @@ export function getLivesBeforeWeek(
 	return lives;
 }
 
+type FinalGroup = "success" | "deducted" | "reset";
+
 function renderFinalLine(
 	membership: MembershipState,
 	registryEvents: RegistryEvent[],
 	weeklyCounts: WeeklyCounts,
 	weekIndex: number,
-): string {
+): { group: FinalGroup; line: string } {
 	const count = getCount(weeklyCounts, membership.userId, weekIndex);
 	const livesBefore = getLivesBeforeWeek(
 		membership,
@@ -158,16 +160,23 @@ function renderFinalLine(
 		weekIndex,
 	);
 	const result = applyWeek(livesBefore, count, membership.weeklyTarget);
+	const head = `${membership.name}  ${count}/${membership.weeklyTarget}`;
 
 	if (result.success) {
-		return `${membership.name}  ${count}/${membership.weeklyTarget} > ${formatLives(result.livesAfter)} ✅`;
+		return { group: "success", line: `${head} ${formatLives(result.livesAfter)}` };
 	}
 
 	if (result.reset) {
-		return `${membership.name}  ${count}/${membership.weeklyTarget} > 💀 ${formatLives(result.livesAfter)}`;
+		return {
+			group: "reset",
+			line: `${head} ${formatLives(livesBefore)} → 💀 → ${formatLives(result.livesAfter)}`,
+		};
 	}
 
-	return `${membership.name}  ${count}/${membership.weeklyTarget} > ${formatLives(result.livesAfter)}`;
+	return {
+		group: "deducted",
+		line: `${head} ${formatLives(livesBefore)} → ${formatLives(result.livesAfter)} (-${livesBefore - result.livesAfter})`,
+	};
 }
 
 function renderCurrentLine(
@@ -233,14 +242,26 @@ export function renderFinalSummary(
 		return `📊 주간 운동 집계 · ${formatWeekRange(weekIndex)}\n\n등록된 참여자가 없습니다.`;
 	}
 
-	const lines = memberships.map((membership) =>
+	const rendered = memberships.map((membership) =>
 		renderFinalLine(membership, registryEvents, weeklyCounts, weekIndex),
 	);
 
+	// 달성 / 차감 / 리셋 순으로 묶고, 해당자가 없는 그룹은 생략합니다.
+	const groups: [FinalGroup, string][] = [
+		["success", "✅ 달성"],
+		["deducted", "⚠️ 차감"],
+		["reset", "💀 리셋"],
+	];
+	const sections = groups.flatMap(([group, title]) => {
+		const lines = rendered
+			.filter((item) => item.group === group)
+			.map((item) => item.line);
+		return lines.length === 0 ? [] : ["", title, ...lines];
+	});
+
 	return [
 		`📊 주간 운동 집계 · ${formatWeekRange(weekIndex)}`,
-		"",
-		...lines,
+		...sections,
 		"",
 		"이번주도 고생 많았습니다!",
 	].join("\n");
