@@ -1,8 +1,10 @@
 import {
+  applyWeek,
   buildWeeklyCounts,
   finalSummaryMarker,
   formatLives,
   getCount,
+  getLivesBeforeWeek,
   renderCurrentSummary,
   renderFinalSummary,
 } from "./aggregate";
@@ -36,6 +38,7 @@ import {
   BASELINE_START_MS,
   formatWeekRange,
   getWeekIndexFromMs,
+  getWeekStartMs,
 } from "./week";
 import { verifyDiscordRequest } from "./verify";
 
@@ -55,7 +58,7 @@ const PERMISSION_MANAGE_GUILD = 1n << 5n;
 
 const USER_SELECT_COMPONENT = 5;
 
-const DAILY_DIGEST_CRON = "0 1 * * *";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const HELP_TEXT = [
   "📖 운동봇 사용법",
@@ -85,7 +88,7 @@ const HELP_TEXT = [
   "/목표조절 목표 [사용자] — 본인 목표(분모) 변경 (관리자는 다른 사람도 가능)",
   "/탈퇴 사용자 — 관리자용, 탈퇴 처리",
   "/집계 [대상] — 이번 주 또는 지난주 현황 확인 (채널에 공개로 표시)",
-  "/룰렛 [대상] — 그 주 목표를 채운 사람 중 무작위로 한 명 추첨 (채널에 공개로 표시)",
+  "/룰렛 [대상] — 그 주 💀 없이 살아남은 사람 중 무작위로 한 명 추첨 (채널에 공개로 표시)",
   "/도움말 — 지금 이 설명 보기",
 ].join("\n");
 
@@ -256,14 +259,20 @@ async function handleRoulette(
   }
 
   const memberships = getActiveMembershipsAtWeek(registryEvents, weekIndex);
-  const eligible = memberships.filter(
-    (membership) =>
-      getCount(weeklyCounts, membership.userId, weekIndex) >=
-      membership.weeklyTarget,
-  );
+  // 목표 달성 여부가 아니라 그 주 차감으로 💀가 되지 않은 사람(생존자)을 후보로 삼습니다.
+  const eligible = memberships.filter((membership) => {
+    const livesBefore = getLivesBeforeWeek(
+      membership,
+      registryEvents,
+      weeklyCounts,
+      weekIndex,
+    );
+    const count = getCount(weeklyCounts, membership.userId, weekIndex);
+    return !applyWeek(livesBefore, count, membership.weeklyTarget).reset;
+  });
 
   if (eligible.length === 0) {
-    return `📛 ${formatWeekRange(weekIndex)} 기준 목표를 채운 사람이 없어서 룰렛을 돌릴 수 없어요.`;
+    return `📛 ${formatWeekRange(weekIndex)} 기준 살아남은 사람이 없어서 룰렛을 돌릴 수 없어요.`;
   }
 
   const winner = pickRandom(eligible);
@@ -272,7 +281,7 @@ async function handleRoulette(
   return [
     `🎰 룰렛 · ${formatWeekRange(weekIndex)}`,
     "",
-    `후보(목표 달성자 ${eligible.length}명): ${candidateNames}`,
+    `후보(생존자 ${eligible.length}명): ${candidateNames}`,
     "",
     `🎉 당첨: **${winner.name}**`,
   ].join("\n");
@@ -1230,11 +1239,18 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
-    if (controller.cron === DAILY_DIGEST_CRON) {
-      await runDailyDigest(env);
+    // 크론은 매일 10:00 KST 하나만 둡니다. 같은 시각에 크론 두 개를 걸면
+    // controller.cron 구분이 보장되지 않아 월요일 마감 결과가 빠졌습니다.
+    // 주 시작일(월요일)에는 지난주 마감 결과만 올리고 현황판은 생략합니다.
+    const scheduledTimeMs = controller.scheduledTime;
+    const sinceWeekStartMs =
+      scheduledTimeMs - getWeekStartMs(getWeekIndexFromMs(scheduledTimeMs));
+
+    if (sinceWeekStartMs < DAY_MS) {
+      await runWeeklyCron(env, scheduledTimeMs);
       return;
     }
 
-    await runWeeklyCron(env, controller.scheduledTime);
+    await runDailyDigest(env);
   },
 };

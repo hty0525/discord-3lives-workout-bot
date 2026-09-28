@@ -117,7 +117,7 @@ const commands = [
   },
   {
     name: "룰렛",
-    description: "그 주 목표를 채운 사람 중에서 무작위로 한 명을 뽑습니다.",
+    description: "그 주 💀 없이 살아남은 사람 중에서 무작위로 한 명을 뽑습니다.",
     type: 1,
     options: [
       {
